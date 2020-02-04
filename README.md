@@ -1,5 +1,7 @@
 # pipe
 
+[![Actions Status](https://github.com/variantdev/pipe/workflows/Go/badge.svg)](https://github.com/variantdev/pipe/actions)
+
 `pipe` is a fork of the awesome [go-pipe](https://github.com/go-pipe/pipe) with a few enhancements:
 
 - Support for Go modules
