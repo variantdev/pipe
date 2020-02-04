@@ -1,6 +1,6 @@
 # pipe
 
-`pipe` is a fork of the awesome [go-pipe](https://github.com/go-pipe/pipe) with a few enhancements on top of that including:
+`pipe` is a fork of the awesome [go-pipe](https://github.com/go-pipe/pipe) with a few enhancements:
 
 - Support for Go modules
 - Support for Go `context.Context` for timeout, cancellation and deadline
@@ -10,6 +10,15 @@
 ## Usage
 
 ```go
+// `p` is basically the following shell script rewritten in Go:
+//
+// #!/usr/bin/env sh
+// PIPE_NEW_VAR=new
+// echo $PIPE_OLD_VAR $PIPE_NEW_VAR
+// PIPE_NEW_VAR=after
+// go run a-go-app-prints-PIPE_NEW_VAR
+// echo hello | sed s/l/k/g
+//
 p := pipe.Script(
     pipe.SetEnvVar("PIPE_NEW_VAR", "new"),
     pipe.System("echo $PIPE_OLD_VAR $PIPE_NEW_VAR"),
@@ -27,6 +36,10 @@ p := pipe.Script(
         }
         return nil
     },
+     pipe.Line(
+        pipe.Print("hello"),
+        pipe.Exec("sed", "s/l/k/g")
+    )
 )
 
 // output contains everything written to stdout by running the script
