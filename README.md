@@ -1,6 +1,6 @@
 # pipe
 
-[![Actions Status](https://github.com/variantdev/pipe/workflows/Go/badge.svg)](https://github.com/variantdev/pipe/actions)
+[![Actions Status](https://github.com/variantdev/pipe/workflows/Go/badge.svg)](https://github.com/variantdev/pipe/actions?query=workflow%3AGo)
 
 `pipe` is a fork of the awesome [go-pipe](https://github.com/go-pipe/pipe) with a few enhancements:
 
