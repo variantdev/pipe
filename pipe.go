@@ -35,6 +35,7 @@ package pipe
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -105,6 +106,8 @@ type State struct {
 	killedMutex sync.Mutex
 	killedNoted bool
 	killed      chan bool
+
+	ctx context.Context
 
 	pendingTasks []*pendingTask
 }
@@ -189,11 +192,19 @@ func (s *State) AddTask(t Task) error {
 	return nil
 }
 
-
 // RunTasks runs all pending tasks registered via AddTask.
 // This is called by the pipe running functions and generally
 // there's no reason to call it directly.
 func (s *State) RunTasks() error {
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if s.ctx != nil {
+		ctx, cancel = context.WithCancel(s.ctx)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
+	defer cancel()
+
 	done := make(chan error, len(s.pendingTasks))
 	for _, f := range s.pendingTasks {
 		go func(pt *pendingTask) {
@@ -239,6 +250,9 @@ func (s *State) RunTasks() error {
 			fail(ErrTimeout)
 			err = <-done
 		case <-s.killed:
+			fail(ErrKilled)
+			err = <-done
+		case <-ctx.Done():
 			fail(ErrKilled)
 			err = <-done
 		}

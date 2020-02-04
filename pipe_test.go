@@ -2,16 +2,18 @@ package pipe_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	. "gopkg.in/check.v1"
-	"gopkg.in/pipe.v2"
+	"github.com/variantdev/pipe"
 )
 
 func Test(t *testing.T) {
@@ -21,6 +23,20 @@ func Test(t *testing.T) {
 type S struct{}
 
 var _ = Suite(S{})
+
+func correctTmpDirPathOnMac(s string) string {
+	if runtime.GOOS == "darwin" {
+		return filepath.Join("/private", s)
+	}
+	return s
+}
+
+func correctSedOutputOnMac(s string) string {
+	if runtime.GOOS == "darwin" {
+		return s + "\n"
+	}
+	return s
+}
 
 func (S) TestStatePath(c *C) {
 	s := pipe.NewState(nil, nil)
@@ -145,6 +161,103 @@ func (S) TestStateKill(c *C) {
 	c.Assert(time.Since(started) < 2*time.Second, Equals, true)
 }
 
+func (S) TestStateContext(c *C) {
+	p := pipe.Exec("echo", "hello")
+	ctx, _ := context.WithCancel(context.Background())
+	s := pipe.New(ctx)
+	outb := &pipe.OutputBuffer{}
+	s.Stdout = outb
+	c.Assert(p(s), IsNil)
+	ch := make(chan error)
+	go func() {
+		ch <- s.RunTasks()
+	}()
+	c.Assert(<-ch, IsNil)
+	c.Assert(string(outb.Bytes()), Equals, "hello\n")
+}
+
+func (S) TestStateContextCancel(c *C) {
+	started := time.Now()
+	p := pipe.Exec("sleep", "1")
+	ctx, cancel := context.WithCancel(context.Background())
+	s := pipe.New(ctx)
+	c.Assert(p(s), IsNil)
+	ch := make(chan error)
+	go func() {
+		ch <- s.RunTasks()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	c.Assert(<-ch, ErrorMatches, "explicitly killed")
+	c.Assert(time.Since(started) < 2*time.Second, Equals, true)
+}
+
+func (S) TestStateContextTimeout(c *C) {
+	started := time.Now()
+	p := pipe.Exec("sleep", "1")
+	ctx, _ := context.WithTimeout(context.Background(), 100 * time.Millisecond)
+	s := pipe.New(ctx)
+	c.Assert(p(s), IsNil)
+	ch := make(chan error)
+	go func() {
+		ch <- s.RunTasks()
+	}()
+	c.Assert(<-ch, ErrorMatches, "explicitly killed")
+	c.Assert(time.Since(started) < 2*time.Second, Equals, true)
+}
+
+func (S) TestStateContextDeadline(c *C) {
+	started := time.Now()
+	p := pipe.Exec("sleep", "1")
+	ctx, _ := context.WithDeadline(context.Background(), started.Add(- 2 * time.Second))
+	s := pipe.New(ctx)
+	c.Assert(p(s), IsNil)
+	ch := make(chan error)
+	go func() {
+		ch <- s.RunTasks()
+	}()
+	c.Assert(<-ch, ErrorMatches, "explicitly killed")
+	c.Assert(time.Since(started) < 2*time.Second, Equals, true)
+}
+
+func (S) TestDoCancel(c *C) {
+	started := time.Now()
+	p := pipe.Exec("sleep", "1")
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan error)
+	go func() {
+		ch <- pipe.Do(ctx, pipe.NewState(nil, nil), p)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	c.Assert(<-ch, ErrorMatches, "context canceled")
+	c.Assert(time.Since(started) < 2*time.Second, Equals, true)
+}
+
+func (S) TestDoTimeout(c *C) {
+	started := time.Now()
+	p := pipe.Exec("sleep", "1")
+	ctx, _ := context.WithTimeout(context.Background(), 100 * time.Millisecond)
+	ch := make(chan error)
+	go func() {
+		ch <- pipe.Do(ctx, pipe.NewState(nil, nil), p)
+	}()
+	c.Assert(<-ch, ErrorMatches, "context deadline exceeded")
+	c.Assert(time.Since(started) < 2*time.Second, Equals, true)
+}
+
+func (S) TestDoDeadline(c *C) {
+	started := time.Now()
+	p := pipe.Exec("sleep", "1")
+	ctx, _ := context.WithDeadline(context.Background(), started.Add(- 2 * time.Second))
+	ch := make(chan error)
+	go func() {
+		ch <- pipe.Do(ctx, pipe.NewState(nil, nil), p)
+	}()
+	c.Assert(<-ch, ErrorMatches, "context deadline exceeded")
+	c.Assert(time.Since(started) < 2*time.Second, Equals, true)
+}
+
 func (S) TestSystem(c *C) {
 	p := pipe.System("echo out1; echo err1 1>&2; echo out2; echo err2 1>&2")
 	stdout, stderr, err := pipe.DividedOutput(p)
@@ -174,7 +287,7 @@ func (S) TestLineTermination(c *C) {
 		pipe.Exec("true"),
 	)
 	output, err := pipe.Output(p)
-	c.Assert(err, ErrorMatches, `command "true": write \|1: broken pipe`)
+	c.Assert(err, ErrorMatches, `io: read/write on closed pipe`)
 	c.Assert(string(output), Equals, "")
 }
 
@@ -263,7 +376,7 @@ func (S) TestScriptIsolatesEnv(c *C) {
 }
 
 func (S) TestScriptIsolatesDir(c *C) {
-	dir1 := c.MkDir()
+	dir1 := correctTmpDirPathOnMac(c.MkDir())
 	dir2 := c.MkDir()
 	p := pipe.Script(
 		pipe.ChDir(dir1),
@@ -291,7 +404,8 @@ func (S) TestLineIsolatesEnv(c *C) {
 }
 
 func (S) TestLineIsolatesDir(c *C) {
-	dir1 := c.MkDir()
+	// Workaround to make it passing on macOS
+	dir1 := correctTmpDirPathOnMac(c.MkDir())
 	dir2 := c.MkDir()
 	p := pipe.Line(
 		pipe.ChDir(dir1),
@@ -317,7 +431,7 @@ func (S) TestLineNesting(c *C) {
 	)
 	err := pipe.Run(p)
 	c.Assert(err, IsNil)
-	c.Assert(b.String(), Equals, "hekko")
+	c.Assert(b.String(), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestScriptNesting(c *C) {
@@ -332,7 +446,7 @@ func (S) TestScriptNesting(c *C) {
 	)
 	err := pipe.Run(p)
 	c.Assert(err, IsNil)
-	c.Assert(b.String(), Equals, "worldhekko")
+	c.Assert(b.String(), Equals, correctSedOutputOnMac("worldhekko"))
 }
 
 func (S) TestScriptPreservesStreams(c *C) {
@@ -353,7 +467,8 @@ func (S) TestChDir(c *C) {
 	c.Assert(err, IsNil)
 
 	dir := c.MkDir()
-	subdir := filepath.Join(dir, "subdir")
+	// Workaround to make it passing on macOS
+	subdir := correctTmpDirPathOnMac(filepath.Join(dir, "subdir"))
 	err = os.Mkdir(subdir, 0755)
 	p := pipe.Script(
 		pipe.ChDir(dir),
@@ -372,7 +487,7 @@ func (S) TestChDir(c *C) {
 func (S) TestMkDir(c *C) {
 	dir := c.MkDir()
 	subdir := filepath.Join(dir, "subdir")
-	subsubdir := filepath.Join(subdir, "subsubdir")
+	subsubdir := correctTmpDirPathOnMac(filepath.Join(subdir, "subsubdir"))
 	p := pipe.Script(
 		pipe.MkDir(subdir, 0755), // Absolute
 		pipe.ChDir(subdir),
@@ -393,7 +508,7 @@ func (S) TestMkDirAll(c *C) {
 	dir := c.MkDir()
 	subdir := filepath.Join(dir, "subdir")
 	subsubdir := filepath.Join(subdir, "subsubdir")
-	subsubsubdir := filepath.Join(subsubdir, "subsubsubdir")
+	subsubsubdir := correctTmpDirPathOnMac(filepath.Join(subsubdir, "subsubsubdir"))
 	p := pipe.Script(
 		pipe.MkDirAll(subsubdir, 0755), // Absolute
 		pipe.MkDirAll(subsubdir, 0755),
@@ -419,7 +534,7 @@ func (S) TestPrint(c *C) {
 	)
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "hekko:42")
+	c.Assert(string(output), Equals, correctSedOutputOnMac("hekko:42"))
 }
 
 func (S) TestPrintln(c *C) {
@@ -439,7 +554,7 @@ func (S) TestPrintf(c *C) {
 	)
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "hekko:42")
+	c.Assert(string(output), Equals, correctSedOutputOnMac("hekko:42"))
 }
 
 func (S) TestRead(c *C) {
@@ -449,7 +564,7 @@ func (S) TestRead(c *C) {
 	)
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "hekko")
+	c.Assert(string(output), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestWrite(c *C) {
@@ -462,7 +577,7 @@ func (S) TestWrite(c *C) {
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
 	c.Assert(string(output), Equals, "")
-	c.Assert(b.String(), Equals, "hekko")
+	c.Assert(b.String(), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestDiscard(c *C) {
@@ -485,8 +600,8 @@ func (S) TestTee(c *C) {
 	)
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "hekko")
-	c.Assert(b.String(), Equals, "hekko")
+	c.Assert(string(output), Equals, correctSedOutputOnMac("hekko"))
+	c.Assert(b.String(), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestReadFileAbsolute(c *C) {
@@ -501,7 +616,7 @@ func (S) TestReadFileAbsolute(c *C) {
 	)
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "hekko")
+	c.Assert(string(output), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestReadFileRelative(c *C) {
@@ -516,7 +631,7 @@ func (S) TestReadFileRelative(c *C) {
 	)
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "hekko")
+	c.Assert(string(output), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestReadFileNonExistent(c *C) {
@@ -543,7 +658,7 @@ func (S) TestWriteFileAbsolute(c *C) {
 
 	data, err := ioutil.ReadFile(path)
 	c.Assert(err, IsNil)
-	c.Assert(string(data), Equals, "hekko")
+	c.Assert(string(data), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestWriteFileRelative(c *C) {
@@ -563,7 +678,7 @@ func (S) TestWriteFileRelative(c *C) {
 
 	data, err := ioutil.ReadFile(path)
 	c.Assert(err, IsNil)
-	c.Assert(string(data), Equals, "hekko")
+	c.Assert(string(data), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestWriteFileMode(c *C) {
@@ -641,11 +756,11 @@ func (S) TestTeeWriteFileAbsolute(c *C) {
 	)
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "hekko")
+	c.Assert(string(output), Equals, correctSedOutputOnMac("hekko"))
 
 	data, err := ioutil.ReadFile(path)
 	c.Assert(err, IsNil)
-	c.Assert(string(data), Equals, "hekko")
+	c.Assert(string(data), Equals, correctSedOutputOnMac("hekko"))
 
 	stat, err := os.Stat(path)
 	c.Assert(err, IsNil)
@@ -663,11 +778,11 @@ func (S) TestTeeWriteFileRelative(c *C) {
 	)
 	output, err := pipe.Output(p)
 	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "hekko")
+	c.Assert(string(output), Equals, correctSedOutputOnMac("hekko"))
 
 	data, err := ioutil.ReadFile(path)
 	c.Assert(err, IsNil)
-	c.Assert(string(data), Equals, "hekko")
+	c.Assert(string(data), Equals, correctSedOutputOnMac("hekko"))
 }
 
 func (S) TestTeeWriteFileMode(c *C) {
