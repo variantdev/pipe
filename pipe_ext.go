@@ -21,13 +21,13 @@ func Do(parent context.Context, s *State, pipe Pipe) error {
 
 	ch := make(chan error)
 	go func() {
-		ch <- s.Do(parent)
+		ch <- s.Run(parent)
 	}()
 
 	return <-ch
 }
 
-func (s *State) Do(parent context.Context) error {
+func (s *State) Run(parent context.Context) error {
 	var ctx context.Context
 	var cancel context.CancelFunc
 	if parent != nil {
@@ -46,6 +46,7 @@ func (s *State) Do(parent context.Context) error {
 	case err := <-ch:
 		return err
 	case <-ctx.Done():
+		s.Kill()
 		return ctx.Err()
 	}
 }

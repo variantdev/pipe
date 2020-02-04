@@ -1,0 +1,25 @@
+name: Go
+on: [push]
+jobs:
+  build:
+    strategy:
+      matrix:
+        os:
+        - ubuntu-latest
+        - macos-latest
+        go:
+        - 1.13.4
+    runs-on: ${{ matrix.os }}
+    name: Go ${{ matrix.go }} build
+    steps:
+    - uses: actions/checkout@master
+    - name: Setup Go
+      uses: actions/setup-go@v1
+      with:
+        version: ${{ matrix.go }}
+    - name: Run go mod download
+      run: go mod download
+    - name: Run golangci-lint
+      run: make lint
+    - name: Run tests
+      run: make test
