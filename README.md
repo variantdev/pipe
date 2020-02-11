@@ -130,3 +130,4 @@ For shell scripting in Go, and more concretely "replacing bash scripts with Go a
 - https://github.com/b4b4r07/go-pipe, 2019-, runs multiple `exec.Cmd`s in a pipeline and capture the output as bytes.Buffer 
 - https://github.com/urjitbhatia/gopipe, 2016-, stream-filter like API for Go, not exactly for shell scripting
 - https://github.com/spatialcurrent/go-pipe, 2019-, RX-like API for Go
+- https://blog.kowalczyk.info/article/wOYk/advanced-command-execution-in-go-with-osexec.html, vanilla Go os/exec, versatile but lots of boilterplate
