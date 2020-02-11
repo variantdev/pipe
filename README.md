@@ -131,3 +131,4 @@ For shell scripting in Go, and more concretely "replacing bash scripts with Go a
 - https://github.com/urjitbhatia/gopipe, 2016-, stream-filter like API for Go, not exactly for shell scripting
 - https://github.com/spatialcurrent/go-pipe, 2019-, RX-like API for Go
 - https://blog.kowalczyk.info/article/wOYk/advanced-command-execution-in-go-with-osexec.html, vanilla Go os/exec, versatile but lots of boilterplate
+- https://github.com/progrium/go-basher, GO API for embedded bash
